@@ -19,6 +19,9 @@ on:
 
 env:
   PYTHON_VERSION: '3.9'
+
+permissions:
+  contents: write
   
 jobs:
   # Build Job
