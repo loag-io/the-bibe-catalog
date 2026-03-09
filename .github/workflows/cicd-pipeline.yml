@@ -194,23 +194,30 @@ jobs:
         echo "✓ Production deployment successful"
         echo "Environment: $ENVIRONMENT"
         
-    - name: Generate release timestamp
-      id: timestamp
+    - name: Generate release version and timestamp
+      id: version
       run: |
+        # Generate version in YYYY.MM.DD - <Release Number> format (CST)
+        DATE=$(TZ='America/Chicago' date '+%Y.%m.%d')
+        VERSION="${DATE} - ${{ github.run_number }}"
+        echo "version=${VERSION}" >> $GITHUB_OUTPUT
+        
+        # Generate full timestamp
         TIMESTAMP=$(TZ='America/Chicago' date '+%Y-%m-%d %I:%M:%S %p %Z')
         echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
         
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: v${{ github.run_number }}
-        name: Release v${{ github.run_number }}
+        tag_name: ${{ steps.version.outputs.version }}
+        name: Release ${{ steps.version.outputs.version }}
         body: |
           🚀 Automated release from prod branch
           
+          **Version:** ${{ steps.version.outputs.version }}
           **Commit:** ${{ github.sha }}
           **Author:** ${{ github.actor }}
-          **Timestamp:** ${{ steps.timestamp.outputs.timestamp }}
+          **Timestamp:** ${{ steps.version.outputs.timestamp }}
           
           ## 📝 Changelog
           ${{ github.event.head_commit.message }}
@@ -223,7 +230,9 @@ jobs:
     - name: Notify Discord - Success
       if: success()
       run: |
-        # Get timestamp in CST
+        # Get version and timestamp in CST
+        DATE=$(TZ='America/Chicago' date '+%Y.%m.%d')
+        VERSION="${DATE} - ${{ github.run_number }}"
         TIMESTAMP=$(TZ='America/Chicago' date '+%Y-%m-%d %I:%M:%S %p %Z')
         
         # Get the last 10 commit messages for changelog
@@ -236,7 +245,7 @@ jobs:
         fi
         
         curl -H "Content-Type: application/json" \
-             -d "{\"content\":\"✅ **Production Deployment Successful**\n\n**Environment:** prod\n**Release:** v${{ github.run_number }}\n**Author:** ${{ github.actor }}\n**Timestamp:** ${TIMESTAMP}\n\n**📝 Recent Changes:**\n${CHANGELOG}\n\n**🔗 Links:**\n• [Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})\n• [Release](https://github.com/${{ github.repository }}/releases/tag/v${{ github.run_number }})\"}" \
+             -d "{\"content\":\"✅ **Production Deployment Successful**\n\n**Environment:** prod\n**Release:** ${VERSION}\n**Author:** ${{ github.actor }}\n**Timestamp:** ${TIMESTAMP}\n\n**📝 Recent Changes:**\n${CHANGELOG}\n\n**🔗 Links:**\n• [Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})\n• [Release](https://github.com/${{ github.repository }}/releases/tag/${VERSION})\"}" \
              ${{ secrets.DISCORD_WEBHOOK }}
         
     - name: Notify Discord - Failure
