@@ -20,8 +20,8 @@ on:
 env:
   PYTHON_VERSION: '3.9'
 
-permissions: 
-  write-all
+permissions:
+  contents: write
   
 jobs:
   # Build Job
