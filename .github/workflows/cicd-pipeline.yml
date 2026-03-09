@@ -61,25 +61,25 @@ jobs:
       with:
         python-version: ${{ env.PYTHON_VERSION }}
         
-    - name: Install dependencies
-      run: |
-        pip install jupyter nbconvert ipykernel
-        pip install -r requirements.txt
+    # - name: Install dependencies
+    #   run: |
+    #     pip install jupyter nbconvert ipykernel
+    #     pip install -r requirements.txt
         
-    - name: Configure Python kernel
-      run: |
-        python -m ipykernel install --user --name python3
+    # - name: Configure Python kernel
+    #   run: |
+    #     python -m ipykernel install --user --name python3
         
-    - name: Run database setup
-      run: |
-        echo "Converting notebook to Python script..."
-        jupyter nbconvert --to python database/setup/database_setup.ipynb --output-dir=/tmp
-        
-        echo "Running database setup with environment: $ENVIRONMENT"
-        export MOTHERDUCK_TOKEN="${MOTHERDUCK_TOKEN}"
-        export ENVIRONMENT="${ENVIRONMENT}"
-        export DEBUG="${DEBUG}"
-        python /tmp/database_setup.py
+    # - name: Run database setup
+    #   run: |
+    #     echo "Converting notebook to Python script..."
+    #     jupyter nbconvert --to python database/setup/database_setup.ipynb --output-dir=/tmp
+    #     
+    #     echo "Running database setup with environment: $ENVIRONMENT"
+    #     export MOTHERDUCK_TOKEN="${MOTHERDUCK_TOKEN}"
+    #     export ENVIRONMENT="${ENVIRONMENT}"
+    #     export DEBUG="${DEBUG}"
+    #     python /tmp/database_setup.py
         
     - name: Verify deployment
       run: |
@@ -113,25 +113,25 @@ jobs:
       with:
         python-version: ${{ env.PYTHON_VERSION }}
         
-    - name: Install dependencies
-      run: |
-        pip install jupyter nbconvert ipykernel
-        pip install -r requirements.txt
+    # - name: Install dependencies
+    #   run: |
+    #     pip install jupyter nbconvert ipykernel
+    #     pip install -r requirements.txt
         
-    - name: Configure Python kernel
-      run: |
-        python -m ipykernel install --user --name python3
+    # - name: Configure Python kernel
+    #   run: |
+    #     python -m ipykernel install --user --name python3
         
-    - name: Run database setup
-      run: |
-        echo "Converting notebook to Python script..."
-        jupyter nbconvert --to python database/setup/database_setup.ipynb --output-dir=/tmp
-        
-        echo "Running database setup with environment: $ENVIRONMENT"
-        export MOTHERDUCK_TOKEN="${MOTHERDUCK_TOKEN}"
-        export ENVIRONMENT="${ENVIRONMENT}"
-        export DEBUG="${DEBUG}"
-        python /tmp/database_setup.py
+    # - name: Run database setup
+    #   run: |
+    #     echo "Converting notebook to Python script..."
+    #     jupyter nbconvert --to python database/setup/database_setup.ipynb --output-dir=/tmp
+    #     
+    #     echo "Running database setup with environment: $ENVIRONMENT"
+    #     export MOTHERDUCK_TOKEN="${MOTHERDUCK_TOKEN}"
+    #     export ENVIRONMENT="${ENVIRONMENT}"
+    #     export DEBUG="${DEBUG}"
+    #     python /tmp/database_setup.py
         
     - name: Verify deployment
       run: |
@@ -166,25 +166,25 @@ jobs:
       with:
         python-version: ${{ env.PYTHON_VERSION }}
         
-    - name: Install dependencies
-      run: |
-        pip install jupyter nbconvert ipykernel
-        pip install -r requirements.txt
+    # - name: Install dependencies
+    #   run: |
+    #     pip install jupyter nbconvert ipykernel
+    #     pip install -r requirements.txt
         
-    - name: Configure Python kernel
-      run: |
-        python -m ipykernel install --user --name python3
+    # - name: Configure Python kernel
+    #   run: |
+    #     python -m ipykernel install --user --name python3
         
-    - name: Run database setup
-      run: |
-        echo "Converting notebook to Python script..."
-        jupyter nbconvert --to python database/setup/database_setup.ipynb --output-dir=/tmp
-        
-        echo "Running database setup with environment: $ENVIRONMENT"
-        export MOTHERDUCK_TOKEN="${MOTHERDUCK_TOKEN}"
-        export ENVIRONMENT="${ENVIRONMENT}"
-        export DEBUG="${DEBUG}"
-        python /tmp/database_setup.py
+    # - name: Run database setup
+    #   run: |
+    #     echo "Converting notebook to Python script..."
+    #     jupyter nbconvert --to python database/setup/database_setup.ipynb --output-dir=/tmp
+    #     
+    #     echo "Running database setup with environment: $ENVIRONMENT"
+    #     export MOTHERDUCK_TOKEN="${MOTHERDUCK_TOKEN}"
+    #     export ENVIRONMENT="${ENVIRONMENT}"
+    #     export DEBUG="${DEBUG}"
+    #     python /tmp/database_setup.py
         
     - name: Verify deployment
       run: |
