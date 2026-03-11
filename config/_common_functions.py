@@ -73,6 +73,7 @@ def get_motherduck_connection(db_name: str = None):
 def upsert_to_motherduck(df, database_name, schema, table_name, key_columns):
     """
     Simple upsert DataFrame to MotherDuck table with _last_modified_timestamp.
+    Automatically generates a guid column from key_columns if not already present.
     
     Args:
         df (pd.DataFrame): DataFrame to upsert
@@ -81,7 +82,6 @@ def upsert_to_motherduck(df, database_name, schema, table_name, key_columns):
         table_name (str): Table name
         key_columns (str | list): Column(s) to use as unique key for upsert
     """
-
     # Normalize to list
     if isinstance(key_columns, str):
         key_columns = [key_columns]
@@ -92,6 +92,18 @@ def upsert_to_motherduck(df, database_name, schema, table_name, key_columns):
         conn.execute(f"CREATE SCHEMA IF NOT EXISTS {database_name}.{schema}")
 
         df_with_timestamp = df.copy()
+
+        # ── Auto-generate guid if not already present ─────────────
+        # guid = MD5 hash of pipe-delimited key column values
+        # Skip if guid column already exists — trust upstream value
+        if "guid" not in df_with_timestamp.columns:
+            df_with_timestamp.insert(0, "guid",
+                df_with_timestamp[key_columns]
+                .astype(str)
+                .apply(lambda row: hashlib.md5("|".join(row.values).encode()).hexdigest(), axis=1)
+            )
+
+        # ── Add timestamp ─────────────────────────────────────────
         central_time = pd.Timestamp.now(tz='America/Chicago')
         df_with_timestamp['_last_modified_timestamp'] = central_time.tz_localize(None)
 
@@ -111,7 +123,7 @@ def upsert_to_motherduck(df, database_name, schema, table_name, key_columns):
                 CREATE TABLE {full_table_path} AS 
                 SELECT * FROM df_temp
             """)
-            print(f"  ✓ Created new table: {full_table_path} with {len(df)} records")
+            print(f"  ✓ Created new table: {full_table_path} with {len(df):,} records")
         else:
             # Build composite key join condition for DELETE
             join_condition = " AND ".join(
@@ -126,7 +138,7 @@ def upsert_to_motherduck(df, database_name, schema, table_name, key_columns):
                 INSERT INTO {full_table_path} 
                 SELECT * FROM df_temp
             """)
-            print(f"  ✓ Upserted {len(df)} records to {full_table_path}")
+            print(f"  ✓ Upserted {len(df):,} records to {full_table_path}")
 
     finally:
         conn.close()
