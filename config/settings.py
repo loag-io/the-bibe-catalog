@@ -82,7 +82,8 @@ DATABASE_CONFIG = {
 
 # External service configuration
 EXTERNAL_SERVICES = {
-    "discord_webhook": os.getenv("DISCORD_WEBHOOK")
+    "discord_webhook": os.getenv("DISCORD_WEBHOOK"),
+    "esv_api_token": os.getenv("ESV_API_TOKEN")
 }
 
 # ==============================================================================

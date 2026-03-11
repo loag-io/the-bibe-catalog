@@ -70,7 +70,7 @@ def get_motherduck_connection(db_name: str = None):
         db_context = f"'{db_name}'" if db_name else "instance"
         raise ConnectionError(f"Failed to connect to MotherDuck database {db_context}: {str(e)}")
 
-def upsert_to_motherduck(df, database_name, schema, table_name, key_column):
+def upsert_to_motherduck(df, database_name, schema, table_name, key_columns):
     """
     Simple upsert DataFrame to MotherDuck table with _last_modified_timestamp.
     
@@ -79,55 +79,55 @@ def upsert_to_motherduck(df, database_name, schema, table_name, key_column):
         database_name (str): MotherDuck database name (e.g., "ext_development")
         schema (str): Schema name
         table_name (str): Table name
-        key_column (str): Column name to use as unique key for upsert
+        key_columns (str | list): Column(s) to use as unique key for upsert
     """
-    
-    # Connect to MotherDuck database
+
+    # Normalize to list
+    if isinstance(key_columns, str):
+        key_columns = [key_columns]
+
     conn = get_motherduck_connection(database_name)
-    
+
     try:
-        # Create schema if it doesn't exist
         conn.execute(f"CREATE SCHEMA IF NOT EXISTS {database_name}.{schema}")
-        
-        # Add timestamp to DataFrame (Central Time, timezone-naive)
+
         df_with_timestamp = df.copy()
         central_time = pd.Timestamp.now(tz='America/Chicago')
-        # Convert to naive timestamp (removes timezone info but keeps the time correct)
         df_with_timestamp['_last_modified_timestamp'] = central_time.tz_localize(None)
-        
-        # Register DataFrame with MotherDuck
+
         conn.register('df_temp', df_with_timestamp)
-        
-        # Full table path
+
         full_table_path = f"{database_name}.{schema}.{table_name}"
-        
-        # Check if table exists in MotherDuck
+
         table_exists = conn.execute(f"""
             SELECT COUNT(*) FROM information_schema.tables 
             WHERE table_catalog = '{database_name}'
               AND table_schema = '{schema}' 
               AND table_name = '{table_name}'
         """).fetchone()[0] > 0
-        
+
         if not table_exists:
-            # Create new table in MotherDuck
             conn.execute(f"""
                 CREATE TABLE {full_table_path} AS 
                 SELECT * FROM df_temp
             """)
             print(f"  ✓ Created new table: {full_table_path} with {len(df)} records")
         else:
-            # Upsert: delete existing records with matching keys, then insert new data
+            # Build composite key join condition for DELETE
+            join_condition = " AND ".join(
+                [f"{full_table_path}.{col} = df_temp.{col}" for col in key_columns]
+            )
             conn.execute(f"""
-                DELETE FROM {full_table_path} 
-                WHERE {key_column} IN (SELECT {key_column} FROM df_temp)
+                DELETE FROM {full_table_path}
+                USING df_temp
+                WHERE {join_condition}
             """)
             conn.execute(f"""
                 INSERT INTO {full_table_path} 
                 SELECT * FROM df_temp
             """)
             print(f"  ✓ Upserted {len(df)} records to {full_table_path}")
-        
+
     finally:
         conn.close()
         
