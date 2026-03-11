@@ -16,18 +16,30 @@ class ESVBibleIngestion:
         chapter      (int)  : Chapter number
         verse_number (int)  : Verse number
         verse_text   (str)  : Clean verse text
-        
-    Usage (Jupyter Notebook):    
-        ingestor = ESVBibleIngestion(api_key="your-token")
-    
+
+    Usage (Jupyter Notebook):
+        ingestor = ESVBibleIngestion(api_key=EXTERNAL_SERVICES["esv_api_token"], rate_limit=1.0)
+
         # Single passage → df
         df = ingestor.get_passage_df("Genesis 1-3")
-    
+
         # Single book → df
         df = ingestor.get_book_df("Romans")
-    
-        # Full Bible → df (~7 min, 1,189 API calls)
-        df = ingestor.get_full_bible_df()
+
+        # Full Bible — initial run or resume a failed run (default behavior)
+        df = ingestor.get_full_bible_df(
+            database_name=f"ext_{p_env}",
+            schema="bronze",
+            table_name="bible_catalog",
+        )
+
+        # Full Bible — force reprocess all 66 books
+        df = ingestor.get_full_bible_df(
+            database_name=f"ext_{p_env}",
+            schema="bronze",
+            table_name="bible_catalog",
+            reset=True,
+        )
     """
 
     # ── API Config ───────────────────────────────────────────────
@@ -128,6 +140,80 @@ class ESVBibleIngestion:
     # Lookup: book_name → (testament, chapter_count)
     BOOK_LOOKUP = {book: (testament, chapters) for book, testament, chapters in BIBLE_CANON}
 
+    # ── Expected Verse Counts — 66 Books ────────────────────────
+    # Source: confirmed from successful ESV API run
+    # Used to detect partially-ingested books on resume
+    VERSE_COUNTS = {
+        # ── Old Testament ───────────────────────
+        "Genesis":         1533,
+        "Exodus":          1213,
+        "Leviticus":        859,
+        "Numbers":         1288,
+        "Deuteronomy":      959,
+        "Joshua":           658,
+        "Judges":           618,
+        "Ruth":              85,
+        "1 Samuel":         810,
+        "2 Samuel":         695,
+        "1 Kings":          816,
+        "2 Kings":          719,
+        "1 Chronicles":     942,
+        "2 Chronicles":     822,
+        "Ezra":             280,
+        "Nehemiah":         406,
+        "Esther":           167,
+        "Job":             1070,
+        "Psalms":          2461,
+        "Proverbs":         915,
+        "Ecclesiastes":     222,
+        "Song of Solomon":  117,
+        "Isaiah":          1292,
+        "Jeremiah":        1364,
+        "Lamentations":     154,
+        "Ezekiel":         1273,
+        "Daniel":           357,
+        "Hosea":            197,
+        "Joel":              73,
+        "Amos":             146,
+        "Obadiah":           21,
+        "Jonah":             48,
+        "Micah":            105,
+        "Nahum":             47,
+        "Habakkuk":          56,
+        "Zephaniah":         53,
+        "Haggai":            38,
+        "Zechariah":        211,
+        "Malachi":           55,
+        # ── New Testament ───────────────────────
+        "Matthew":         1067,
+        "Mark":             673,
+        "Luke":            1149,
+        "John":             878,
+        "Acts":            1003,
+        "Romans":           432,
+        "1 Corinthians":    437,
+        "2 Corinthians":    257,
+        "Galatians":        149,
+        "Ephesians":        155,
+        "Philippians":      104,
+        "Colossians":        95,
+        "1 Thessalonians":   89,
+        "2 Thessalonians":   47,
+        "1 Timothy":        113,
+        "2 Timothy":         83,
+        "Titus":             46,
+        "Philemon":          25,
+        "Hebrews":          303,
+        "James":            108,
+        "1 Peter":          105,
+        "2 Peter":           61,
+        "1 John":           105,
+        "2 John":            13,
+        "3 John":            15,
+        "Jude":              25,
+        "Revelation":       404,
+    }
+
     # ── Init ─────────────────────────────────────────────────────
 
     def __init__(self, api_key: str = None, rate_limit: float = None):
@@ -212,29 +298,100 @@ class ESVBibleIngestion:
 
         return df
 
-    def get_full_bible_df(self) -> pd.DataFrame:
+    def get_full_bible_df(
+        self,
+        database_name: str = None,
+        schema: str        = "bronze",
+        table_name: str    = "bible_catalog",
+        reset: bool        = False,
+    ) -> pd.DataFrame:
         """
         Ingest all 66 books of the ESV Bible.
-        ~1,189 API calls, ~7 min at default rate limit.
-        """
-        start_time  = time.time()
-        inner_width = self.LINE_LEN - 2  # width between ┌ and ┐
+        ~1,189 API calls. Duration depends on rate_limit setting.
 
-        # ── Start banner ─────────────────────────────────────────
-        title    = "ESV FULL BIBLE INGESTION"
-        sep_len  = inner_width - 2 - len(title) - 1  # ─ + space + title + space + ─...
-        meta     = "Books: 66 (39 OT + 27 NT)  |  Est. calls: ~1,189  |  Est. time: ~7 min"
+        Args:
+            database_name (str) : MotherDuck database (e.g. "ext_dev"). Required.
+            schema        (str) : Schema name. Default: "bronze".
+            table_name    (str) : Table name.  Default: "bible_catalog".
+            reset         (bool): False (default) → resume, skip already-complete books.
+                                  True            → reprocess all 66 books from scratch.
+
+        Raises:
+            ValueError      : If database_name is not provided.
+            ConnectionError : If MotherDuck connection fails when reading existing table.
+        """
+
+        # ── Validate database_name ────────────────────────────────
+        if not database_name:
+            raise ValueError(
+                "database_name is required. "
+                "Example: get_full_bible_df(database_name=f\"ext_{p_env}\")"
+            )
+
+        # ── Resolve completed books ───────────────────────────────
+        completed_books = set()
+        table_path      = f"{database_name}.{schema}.{table_name}"
+
+        if reset:
+            # Force reprocess — ignore anything already in the table
+            mode_label = "RESET — reprocessing all 66 books"
+
+        else:
+            # Try to read existing table to find already-completed books
+            try:
+                existing_df = read_motherduck_table(database_name, schema, table_name)
+
+                if existing_df.empty:
+                    mode_label = "INITIAL RUN — table exists but is empty, processing all 66 books"
+                else:
+                    # A book is only complete if BOTH:
+                    # 1. Chapter count in table matches expected chapter count
+                    # 2. Verse count in table matches expected verse count
+                    # This catches books that failed mid-chapter (correct chapter
+                    # count but wrong verse count) as well as books that failed
+                    # mid-book (wrong chapter count).
+                    actual_chapters = existing_df.groupby('book')['chapter'].nunique()
+                    actual_verses   = existing_df.groupby('book').size()
+
+                    completed_books = set(
+                        book for book in actual_chapters.index
+                        if book in self.BOOK_LOOKUP
+                        and book in self.VERSE_COUNTS
+                        and actual_chapters[book] >= self.BOOK_LOOKUP[book][1]
+                        and actual_verses[book]   >= self.VERSE_COUNTS[book]
+                    )
+                    partial_books = set(actual_chapters.index) - completed_books
+                    remaining     = 66 - len(completed_books)
+
+                    mode_label = f"RESUME — {len(completed_books)} complete, {remaining} remaining"
+                    if partial_books:
+                        mode_label += f" ({len(partial_books)} partial — will reprocess)"
+
+            except Exception:
+                # Table doesn't exist yet — fresh run, upsert cell will create it
+                mode_label = "INITIAL RUN — no existing table found, processing all 66 books"
+
+        # ── Start banner ──────────────────────────────────────────
+        inner_width = self.LINE_LEN - 2
+        title       = "ESV FULL BIBLE INGESTION"
+        sep_len     = inner_width - 2 - len(title) - 1
+        meta        = f"Books: 66 (39 OT + 27 NT)  |  Mode: {mode_label}"
+
         print(f"\n┌─ {title} {'─' * sep_len}┐")
         print(f"│ {meta:<{inner_width - 2}} │")
+        print(f"│ {f'Source: {table_path}':<{inner_width - 2}} │")
         print(f"└{'─' * inner_width}┘")
 
-        all_rows = []
+        # ── Process books ─────────────────────────────────────────
+        start_time      = time.time()
+        all_rows        = []
+        skipped_count   = 0
+        processed_count = 0
 
         for testament_label, testament_filter, testament_total in [
             ("OLD TESTAMENT", "Old Testament", 39),
             ("NEW TESTAMENT", "New Testament", 27),
         ]:
-            # ── Testament section header ──────────────────────────
             section_title = f"── {testament_label} ({testament_total} books) "
             print(f"\n{section_title}{'─' * (self.LINE_LEN - len(section_title))}")
 
@@ -244,6 +401,14 @@ class ESVBibleIngestion:
                     continue
 
                 book_idx += 1
+
+                # ── Skip if already complete ──────────────────────
+                if not reset and book_name in completed_books:
+                    skipped_count += 1
+                    print(f"  [{book_idx:02d}/{testament_total:02d}] {book_name:<20} {chapter_count:>3} ch  →  skipped ✓")
+                    continue
+
+                # ── Fetch book ────────────────────────────────────
                 book_rows = []
 
                 for chapter_num in range(1, chapter_count + 1):
@@ -252,24 +417,49 @@ class ESVBibleIngestion:
                     passages = raw.get("passages", [])
 
                     if passages:
-                        book_rows.extend(self._parse_passage_text(passages[0], book_name, testament, start_chapter=chapter_num))
+                        book_rows.extend(
+                            self._parse_passage_text(passages[0], book_name, testament, start_chapter=chapter_num)
+                        )
                     else:
                         print(f"  ⚠️  Empty response: {ref}")
 
                     time.sleep(self.rate_limit)
 
                 all_rows.extend(book_rows)
-                print(f"  [{book_idx:02d}/{testament_total:02d}] {book_name:<20} {chapter_count:>3} ch  →  {len(book_rows):>5} verses  ✓")
+                processed_count += 1
+                expected    = self.VERSE_COUNTS.get(book_name)
+                verse_label = f"{len(book_rows):>5} verses"
+                flag        = "" if not expected or len(book_rows) >= expected else f"  ⚠️  expected {expected:,}"
+                print(f"  [{book_idx:02d}/{testament_total:02d}] {book_name:<20} {chapter_count:>3} ch  →  {verse_label}  ✓{flag}")
 
         # ── Complete banner ───────────────────────────────────────
         df       = self._to_df(all_rows)
         duration = time.time() - start_time
 
-        title    = "ESV FULL BIBLE COMPLETE"
-        sep_len  = inner_width - 2 - len(title) - 1
-        summary  = f"Total verses: {len(df):,}  |  Books: 66  |  Duration: {format_duration(duration)}"
+        # Check for any books with unexpected verse counts
+        verse_warnings = []
+        if not df.empty:
+            actual_by_book = df.groupby('book').size()
+            for book_name in actual_by_book.index:
+                expected = self.VERSE_COUNTS.get(book_name)
+                actual   = actual_by_book[book_name]
+                if expected and actual < expected:
+                    verse_warnings.append(f"{book_name} ({actual:,}/{expected:,})")
+
+        title   = "ESV FULL BIBLE COMPLETE"
+        sep_len = inner_width - 2 - len(title) - 1
+        summary = (
+            f"Fetched: {len(df):,} verses  |  "
+            f"Processed: {processed_count} books  |  "
+            f"Skipped: {skipped_count} books  |  "
+            f"Duration: {format_duration(duration)}"
+        )
+
         print(f"\n┌─ {title} {'─' * sep_len}┐")
         print(f"│ {summary:<{inner_width - 2}} │")
+        if verse_warnings:
+            warn_str = f"⚠️  Incomplete books: {', '.join(verse_warnings)}"
+            print(f"│ {warn_str:<{inner_width - 2}} │")
         print(f"└{'─' * inner_width}┘\n")
 
         return df
