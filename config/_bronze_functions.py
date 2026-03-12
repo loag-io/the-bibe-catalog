@@ -43,11 +43,14 @@ class ESVBibleIngestion:
     """
 
     # ── API Config ───────────────────────────────────────────────
-    BASE_URL      = "https://api.esv.org/v3/passage/text/"
-    RATE_LIMIT    = 0.25
-    MAX_RETRIES   = 3
-    RETRY_BACKOFF = 2.0
-    LINE_LEN      = 86  # total width including corner/edge chars
+    BASE_URL           = "https://api.esv.org/v3/passage/text/"
+    RATE_LIMIT         = 0.25
+    MAX_RETRIES        = 3
+    RETRY_BACKOFF      = 2.0
+    LINE_LEN           = 86   # total width including corner/edge chars
+    HOURLY_LIMIT       = 1000 # ESV API max requests per hour
+    WARN_THRESHOLD     = 950  # warn when approaching limit
+    STOP_THRESHOLD     = 990  # stop to preserve 10 request buffer
 
     # ── ESV API Parameters ───────────────────────────────────────
     # Tuned for clean AI/NLP processing
@@ -236,7 +239,7 @@ class ESVBibleIngestion:
         self._print_section_header("ESV PASSAGE FETCH")
         print(f"  Reference: {passage}")
 
-        raw      = self._fetch_raw(passage)
+        raw, _   = self._fetch_raw(passage)
         passages = raw.get("passages", [])
 
         if not passages:
@@ -277,7 +280,7 @@ class ESVBibleIngestion:
         all_rows = []
         for chapter_num in range(1, chapter_count + 1):
             ref      = f"{book_name} {chapter_num}:1-200"
-            raw      = self._fetch_raw(ref)
+            raw, _   = self._fetch_raw(ref)
             passages = raw.get("passages", [])
 
             if passages:
@@ -300,21 +303,27 @@ class ESVBibleIngestion:
 
     def get_full_bible_df(
         self,
-        database_name: str = None,
-        schema: str        = "bronze",
-        table_name: str    = "bible_catalog",
-        reset: bool        = False,
+        database_name : str  = None,
+        schema        : str  = "bronze",
+        table_name    : str  = "bible_catalog",
+        key_columns   : list = None,
+        reset         : bool = False,
     ) -> pd.DataFrame:
         """
         Ingest all 66 books of the ESV Bible.
         ~1,189 API calls. Duration depends on rate_limit setting.
 
+        If key_columns is provided, upserts each book to MotherDuck immediately
+        after it is fetched — safer for long runs and rate-limited stops.
+
         Args:
-            database_name (str) : MotherDuck database (e.g. "ext_dev"). Required.
-            schema        (str) : Schema name. Default: "bronze".
-            table_name    (str) : Table name.  Default: "bible_catalog".
-            reset         (bool): False (default) → resume, skip already-complete books.
-                                  True            → reprocess all 66 books from scratch.
+            database_name (str)  : MotherDuck database (e.g. "ext_dev"). Required.
+            schema        (str)  : Schema name. Default: "bronze".
+            table_name    (str)  : Table name.  Default: "bible_catalog".
+            key_columns   (list) : Upsert key columns. If provided, upserts after each book.
+                                   Example: ["translation", "book", "chapter", "verse_number"]
+            reset         (bool) : False (default) → resume, skip already-complete books.
+                                   True            → reprocess all 66 books from scratch.
 
         Raises:
             ValueError      : If database_name is not provided.
@@ -333,25 +342,17 @@ class ESVBibleIngestion:
         table_path      = f"{database_name}.{schema}.{table_name}"
 
         if reset:
-            # Force reprocess — ignore anything already in the table
             mode_label = "RESET — reprocessing all 66 books"
 
         else:
-            # Try to read existing table to find already-completed books
             try:
                 existing_df = read_motherduck_table(database_name, schema, table_name)
 
                 if existing_df.empty:
                     mode_label = "INITIAL RUN — table exists but is empty, processing all 66 books"
                 else:
-                    # A book is only complete if BOTH:
-                    # 1. Chapter count in table matches expected chapter count
-                    # 2. Verse count in table matches expected verse count
-                    # This catches books that failed mid-chapter (correct chapter
-                    # count but wrong verse count) as well as books that failed
-                    # mid-book (wrong chapter count).
-                    actual_chapters = existing_df.groupby('book')['chapter'].nunique()
-                    actual_verses   = existing_df.groupby('book').size()
+                    actual_chapters = existing_df.groupby("book")["chapter"].nunique()
+                    actual_verses   = existing_df.groupby("book").size()
 
                     completed_books = set(
                         book for book in actual_chapters.index
@@ -368,7 +369,6 @@ class ESVBibleIngestion:
                         mode_label += f" ({len(partial_books)} partial — will reprocess)"
 
             except Exception:
-                # Table doesn't exist yet — fresh run, upsert cell will create it
                 mode_label = "INITIAL RUN — no existing table found, processing all 66 books"
 
         # ── Start banner ──────────────────────────────────────────
@@ -387,6 +387,8 @@ class ESVBibleIngestion:
         all_rows        = []
         skipped_count   = 0
         processed_count = 0
+        request_count   = 0
+        rate_limited    = False
 
         for testament_label, testament_filter, testament_total in [
             ("OLD TESTAMENT", "Old Testament", 39),
@@ -395,6 +397,9 @@ class ESVBibleIngestion:
             section_title = f"── {testament_label} ({testament_total} books) "
             print(f"\n{section_title}{'─' * (self.LINE_LEN - len(section_title))}")
 
+            if rate_limited:
+                break
+
             book_idx = 0
             for book_name, testament, chapter_count in self.BIBLE_CANON:
                 if testament != testament_filter:
@@ -402,19 +407,30 @@ class ESVBibleIngestion:
 
                 book_idx += 1
 
-                # ── Skip if already complete ──────────────────────
                 if not reset and book_name in completed_books:
                     skipped_count += 1
                     print(f"  [{book_idx:02d}/{testament_total:02d}] {book_name:<20} {chapter_count:>3} ch  →  skipped ✓")
                     continue
 
-                # ── Fetch book ────────────────────────────────────
                 book_rows = []
 
                 for chapter_num in range(1, chapter_count + 1):
-                    ref      = f"{book_name} {chapter_num}:1-200"
-                    raw      = self._fetch_raw(ref)
-                    passages = raw.get("passages", [])
+
+                    # ── Warn at 950 ───────────────────────────────
+                    if request_count == self.WARN_THRESHOLD:
+                        print(f"\n  ⚠️  Rate limit approaching: {request_count} / {self.HOURLY_LIMIT} requests used")
+
+                    # ── Stop at 990 ───────────────────────────────
+                    if request_count >= self.STOP_THRESHOLD:
+                        print(f"\n  ✗ Rate limit stop: {request_count} / {self.HOURLY_LIMIT} requests used")
+                        print(f"  ✗ Stopped at {book_name} ch {chapter_num} — resume after throttling limit expires to continue")
+                        rate_limited = True
+                        break
+
+                    ref                = f"{book_name} {chapter_num}:1-200"
+                    raw, attempts_used = self._fetch_raw(ref)
+                    passages           = raw.get("passages", [])
+                    request_count     += attempts_used
 
                     if passages:
                         book_rows.extend(
@@ -429,40 +445,61 @@ class ESVBibleIngestion:
                 processed_count += 1
                 expected    = self.VERSE_COUNTS.get(book_name)
                 verse_label = f"{len(book_rows):>5} verses"
-                flag        = "" if not expected or len(book_rows) >= expected else f"  ⚠️  expected {expected:,}"
-                print(f"  [{book_idx:02d}/{testament_total:02d}] {book_name:<20} {chapter_count:>3} ch  →  {verse_label}  ✓{flag}")
+
+                if rate_limited:
+                    # Upsert partial book before stopping
+                    upsert_label = ""
+                    if key_columns and book_rows:
+                        book_df = self._to_df(book_rows)
+                        upsert_to_motherduck(book_df, database_name, schema, table_name, key_columns)
+                        upsert_label = f"  | upserted {len(book_df):,}"
+                    print(f"  [{book_idx:02d}/{testament_total:02d}] {book_name:<20} {chapter_count:>3} ch  →  {verse_label}  ⚠️  (partial — rate limited){upsert_label}")
+                    break
+                else:
+                    # Upsert completed book immediately
+                    upsert_label = ""
+                    if key_columns and book_rows:
+                        book_df = self._to_df(book_rows)
+                        upsert_to_motherduck(book_df, database_name, schema, table_name, key_columns)
+                        upsert_label = f"  | upserted {len(book_df):,}"
+                    flag = "" if not expected or len(book_rows) >= expected else f"  ⚠️  expected {expected:,}"
+                    print(f"  [{book_idx:02d}/{testament_total:02d}] {book_name:<20} {chapter_count:>3} ch  →  {verse_label}  ✓{flag}{upsert_label}")
 
         # ── Complete banner ───────────────────────────────────────
         df       = self._to_df(all_rows)
         duration = time.time() - start_time
 
-        # Check for any books with unexpected verse counts
         verse_warnings = []
         if not df.empty:
-            actual_by_book = df.groupby('book').size()
+            actual_by_book = df.groupby("book").size()
             for book_name in actual_by_book.index:
                 expected = self.VERSE_COUNTS.get(book_name)
                 actual   = actual_by_book[book_name]
                 if expected and actual < expected:
                     verse_warnings.append(f"{book_name} ({actual:,}/{expected:,})")
 
-        title   = "ESV FULL BIBLE COMPLETE"
+        title   = "ESV FULL BIBLE COMPLETE" if not rate_limited else "ESV FULL BIBLE STOPPED — RATE LIMITED"
         sep_len = inner_width - 2 - len(title) - 1
         summary = (
             f"Fetched: {len(df):,} verses  |  "
             f"Processed: {processed_count} books  |  "
             f"Skipped: {skipped_count} books  |  "
+            f"Requests: {request_count} / {self.HOURLY_LIMIT}  |  "
             f"Duration: {format_duration(duration)}"
         )
 
         print(f"\n┌─ {title} {'─' * sep_len}┐")
         print(f"│ {summary:<{inner_width - 2}} │")
+        if rate_limited:
+            resume_str = "⚠️  Resume after throttling limit expires — run get_full_bible_df() again to continue from where it stopped"
+            print(f"│ {resume_str:<{inner_width - 2}} │")
         if verse_warnings:
             warn_str = f"⚠️  Incomplete books: {', '.join(verse_warnings)}"
             print(f"│ {warn_str:<{inner_width - 2}} │")
         print(f"└{'─' * inner_width}┘\n")
 
         return df
+
 
     # ── Private: Print Helpers ───────────────────────────────────
 
@@ -473,22 +510,24 @@ class ESVBibleIngestion:
 
     # ── Private: API ─────────────────────────────────────────────
 
-    def _fetch_raw(self, passage: str) -> dict:
-        params = {"q": passage, **self.DEFAULT_PARAMS}
+    def _fetch_raw(self, passage: str) -> tuple[dict, int]:
+        params        = {"q": passage, **self.DEFAULT_PARAMS}
+        attempts_used = 0
 
         for attempt in range(1, self.MAX_RETRIES + 1):
+            attempts_used += 1  # count every real HTTP call including retries
             try:
                 resp = requests.get(
                     self.BASE_URL, headers=self._headers,
                     params=params, timeout=15
                 )
                 resp.raise_for_status()
-                return resp.json()
+                return resp.json(), attempts_used
 
             except requests.exceptions.HTTPError as e:
                 if e.response.status_code == 400:
                     print(f"  ⚠️  Bad request — skipping: {passage!r}")
-                    return {}
+                    return {}, attempts_used
 
             except requests.exceptions.RequestException as e:
                 print(f"  ⚠️  Request error on {passage!r}, attempt {attempt}: {e}")
@@ -497,7 +536,7 @@ class ESVBibleIngestion:
                 time.sleep(self.rate_limit * (self.RETRY_BACKOFF ** attempt))
 
         print(f"  ✗ All {self.MAX_RETRIES} attempts failed for {passage!r}")
-        return {}
+        return {}, attempts_used
 
     # ── Private: Parsing ─────────────────────────────────────────
 
