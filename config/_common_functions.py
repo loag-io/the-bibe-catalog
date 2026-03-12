@@ -123,7 +123,7 @@ def upsert_to_motherduck(df, database_name, schema, table_name, key_columns):
                 CREATE TABLE {full_table_path} AS 
                 SELECT * FROM df_temp
             """)
-            print(f"  ✓ Created new table: {full_table_path} with {len(df):,} records")
+            # print(f"  ✓ Created new table: {full_table_path} with {len(df):,} records")
         else:
             # Build composite key join condition for DELETE
             join_condition = " AND ".join(
@@ -138,7 +138,7 @@ def upsert_to_motherduck(df, database_name, schema, table_name, key_columns):
                 INSERT INTO {full_table_path} 
                 SELECT * FROM df_temp
             """)
-            print(f"  ✓ Upserted {len(df):,} records to {full_table_path}")
+            # print(f"  ✓ Upserted {len(df):,} records to {full_table_path}")
 
     finally:
         conn.close()
