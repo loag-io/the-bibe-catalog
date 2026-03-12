@@ -86,6 +86,11 @@ EXTERNAL_SERVICES = {
     "esv_api_token": os.getenv("ESV_API_TOKEN")
 }
 
+# External service configuration
+MODEL = {
+    "embedding_model": "nomic-embed-text:v1.5"
+}
+
 # ==============================================================================
 # 6. UTILITY FUNCTIONS
 # ==============================================================================
