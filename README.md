@@ -95,11 +95,11 @@ Gold Layer (Knowledge Graph - Neo4j)
 
 *   **Graph Database (Gold Layer)**: Neo4j
 *   **Relational Database (Bronze/Silver Layers)**: DuckDB
-*   **Vector Database**: Pinecone / Weaviate / Chroma
-*   **LLM Framework**: LangChain / LlamaIndex
-*   **AI Models**: OpenAI GPT-4 / Anthropic Claude
+*   **Vector Database**: DuckDB
+*   **LLM Framework**: LangChain / LlamaIndex / LangGraph
+*   **AI Models**: Llama / Qwen
 *   **Data Processing**: Python, Pandas
-*   **Orchestration**: Apache Airflow / Prefect
+*   **Orchestration**: Jupytere Scheduler
 *   **API Layer**: FastAPI / GraphQL
 
 ### Project Structure
@@ -107,7 +107,7 @@ Gold Layer (Knowledge Graph - Neo4j)
 ```
 the-bible-catalog/
 ├── config/             # Configuration files
-│   └── .env            # Environment variables
+│   └── .env            # Environment variables (locally stored)
 ├── database/
 │   └── setup/          # Database setup scripts and notebooks
 ├── docs/               # Documentation
