@@ -34,6 +34,16 @@ The system follows a **Bronze → Silver → Gold** medallion architecture:
 
 ![Screenshot](docs/assets/graphrag-medallion-architecture.svg)
 
+This system organizes data processing into three progressive layers, each building on the last.
+
+**`Bronze`** is the raw ingestion layer. Source documents arrive here unchanged — PDFs, web pages, youtube/podcast/database exports, API responses. It's the immutable source of truth; nothing is transformed or discarded.
+
+**`Silver`** is where structure emerges. Text is chunked, and an extraction pipeline identifies node(s), label(s), relationship(s) and properties. These will then be used in the knowledge graph, turning unstructured content into something traversable and queryable.
+
+**`Gold`** is the query-ready layer. The graph is enriched with vector embeddings on nodes and their surrounding context. Retrieval at this layer combines semantic similarity search with explicit graph traversal — enabling multi-hop reasoning across connected facts that flat vector search alone cannot handle.
+
+The critical distinction from standard RAG happens at the Silver→Gold boundary: instead of indexing isolated text chunks, you're indexing a *graph*. Queries can follow chains of relationships, not just match similar passages.
+
 #### GraphRAG Pipeline
 
 1. **Ingestion**: Load biblical texts and external resources
