@@ -7,6 +7,7 @@ ___
 
 ### Contents
 - [Overview](#overview)
+- [Getting Started](#getting-started)
 - [Architecture](#architecture)
   - [Medallion Data Architecture](#medallion-data-architecture)
   - [GraphRAG Pipeline](#graphrag-pipeline)
@@ -25,6 +26,17 @@ This project leverages **Graph Retrieval-Augmented Generation (GraphRAG)** to cr
 *   Map multi-dimensional relationships across scripture
 *   Integrate insights from sermons, podcasts, articles, and theological books
 *   Enable deep exploration of biblical themes, contexts, and patterns
+
+
+### Getting Started
+
+For full setup instructions, see the [Setup Guide](docs/guides/setup.md). It covers:
+
+- Environment configuration and dependencies
+- Python 3.12 virtual environment setup
+- JupyterLab installation and kernel registration
+- Environment variable configuration
+- Troubleshooting common issues
 
 ### Architecture
 
@@ -125,5 +137,7 @@ Contributions are welcome as the project develops. Areas for future contribution
 *   Graph query optimization
 *   Documentation
 *   Testing
+
+___
 
 > **NOTE**: This is a research and educational project. Cross-references and relationships are AI-assisted and should be validated by theological experts for scholarly or ministerial use.
