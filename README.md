@@ -32,26 +32,7 @@ This project leverages **Graph Retrieval-Augmented Generation (GraphRAG)** to cr
 
 The system follows a **Bronze → Silver → Gold** medallion architecture:
 
-```
-Bronze Layer (Raw Data - DuckDB)
-├── Biblical texts (multiple translations)
-├── Sermon transcripts
-├── Podcast episodes
-├── Articles & blog posts
-└── Theological books
-
-Silver Layer (Processed Data - DuckDB)
-├── Cleaned and normalized texts
-├── Embedded vectors for semantic search
-├── Initial cross-reference extraction
-└── Entity recognition (people, places, events)
-
-Gold Layer (Knowledge Graph - Neo4j)
-├── Validated cross-references
-├── Multi-dimensional relationships
-├── Graph analytics & insights
-└── Query-optimized structure
-```
+![Screenshot](docs/assets/graphrag-architecture.svg)
 
 #### GraphRAG Pipeline
 
