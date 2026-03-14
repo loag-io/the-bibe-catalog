@@ -32,7 +32,7 @@ This project leverages **Graph Retrieval-Augmented Generation (GraphRAG)** to cr
 
 The system follows a **Bronze → Silver → Gold** medallion architecture:
 
-![Screenshot](docs/assets/graphrag-architecture.svg)
+![Screenshot](docs/assets/graphrag-medallion-architecture.svg)
 
 #### GraphRAG Pipeline
 
