@@ -1,4 +1,4 @@
-### Biblical GraphRAG: Mapping Multi-Dimensional Scripture Relationships `v 0.1.0`
+### Biblical GraphRAG: Mapping Multi-Dimensional Scripture Relationships `v 0.1.1`
 ___
 
 > **Purpose**
